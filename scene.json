@@ -1,10 +1,10 @@
 {
-  "version": 3,
-  "exportedAt": "2026-02-08T06:55:59.780Z",
+  "version": 4,
+  "exportedAt": "2026-02-08T07:17:01.278Z",
   "devicePreset": "430x932",
   "door": {
-    "x": 41.91559419248406,
-    "y": 302.8977065141062
+    "x": 93,
+    "y": 332.66668701171875
   },
   "layers": [
     {
@@ -73,8 +73,8 @@
       "locked": false,
       "z": 2,
       "anim": {
-        "type": "water",
-        "vx": 20,
+        "type": "cloud",
+        "vx": 2,
         "vy": 0,
         "vs": 0.02,
         "swayRot": 0.6,
@@ -182,7 +182,7 @@
       "z": 6,
       "anim": {
         "type": "cloud",
-        "vx": -14,
+        "vx": -2,
         "vy": 0,
         "vs": 0.02,
         "swayRot": 0.6,
