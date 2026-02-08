@@ -1,0 +1,296 @@
+<!-- =========================
+FILE 2/2: viewer.html
+- This is what Sangee sees (NO editor UI)
+- Loops all animations forever (clouds wrap correctly)
+- Scroll (or swipe up) zooms camera into Door Target
+- Disables pinch-to-zoom on the page (anchored display)
+USAGE:
+1) Export JSON from editor -> save as scene.json (same folder)
+2) Put all images into assets/ (same folder)
+3) Open viewer.html from server (localhost)
+========================= -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <title>Scene</title>
+  <style>
+    html,body{height:100%;margin:0;overflow:hidden;background:#000}
+    /* block browser pinch zoom / overscroll */
+    body{touch-action: pan-y; overscroll-behavior: none;}
+
+    .wrap{
+      position:fixed; inset:0;
+      display:grid; place-items:center;
+      background:#000;
+    }
+
+    /* phone-like viewport (real iPhone size) */
+    .frame{
+      position:relative;
+      width:390px;
+      height:844px;
+      overflow:hidden;
+      border-radius:22px;
+      background:#000;
+    }
+
+    /* camera transform happens here */
+    .camera{
+      position:absolute; inset:0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    .sprite{
+      position:absolute; left:0; top:0;
+      transform-origin:0 0;
+      user-select:none; -webkit-user-drag:none;
+      pointer-events:none;
+      will-change: transform;
+    }
+
+    /* optional subtle vignette */
+    .vignette{
+      position:absolute; inset:0;
+      pointer-events:none;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(0,0,0,.25) 80%, rgba(0,0,0,.55) 100%);
+    }
+
+    /* mobile: fit screen (no blur) */
+    @media (max-width: 420px){
+      .frame{ width:100vw; height:100vh; border-radius:0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="frame" id="frame">
+      <div class="camera" id="camera"></div>
+      <div class="vignette"></div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const cameraEl = document.getElementById('camera');
+  const frameEl = document.getElementById('frame');
+
+  // Animation state
+  let scene = null;
+  let sprites = [];
+  let t = 0;
+
+  // Camera (what scroll controls)
+  const cam = {
+    scale: 1,
+    x: 0,
+    y: 0,
+    // scroll target 0..1 (0=wide, 1=zoom to door)
+    prog: 0,
+    targetProg: 0
+  };
+
+  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+  function hash(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31 + s.charCodeAt(i))>>>0; return (h % 628)/100; }
+
+  function applySpriteTransform(el, s){
+    el.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.rot}deg) scale(${s.scale})`;
+  }
+
+  function applyCamera(){
+    cameraEl.style.transform = `translate(${-cam.x}px, ${-cam.y}px) scale(${cam.scale})`;
+  }
+
+  function setFrameSizeFromScene(){
+    // If user exported a preset (e.g. 430x932), match it.
+    if (!scene.devicePreset) return;
+    const [w,h] = scene.devicePreset.split('x').map(n=>parseInt(n,10));
+    if (Number.isFinite(w) && Number.isFinite(h)){
+      frameEl.style.width = w + 'px';
+      frameEl.style.height = h + 'px';
+    }
+  }
+
+  async function loadScene(){
+    const res = await fetch('scene.json', { cache:'no-store' });
+    if (!res.ok) throw new Error('scene.json not found. Export from editor and save it next to viewer.html');
+    scene = await res.json();
+    if (!scene.layers) throw new Error('scene.json missing layers[]');
+
+    setFrameSizeFromScene();
+
+    // build sprites in z order
+    sprites = scene.layers
+      .slice()
+      .sort((a,b)=>(a.z??0)-(b.z??0))
+      .map((l, idx) => {
+        const img = new Image();
+        img.className = 'sprite';
+        img.src = `assets/${l.fileName}`;
+        img.style.zIndex = String(idx+1);
+        cameraEl.appendChild(img);
+
+        return {
+          ...l,
+          _el: img,
+          _base: { x:l.x, y:l.y, scale:l.scale, rot:l.rot }
+        };
+      });
+
+    // start camera at wide view
+    cam.scale = 1;
+    cam.x = 0;
+    cam.y = 0;
+    applyCamera();
+  }
+
+  function tick(){
+    const W = frameEl.clientWidth;
+    const H = frameEl.clientHeight;
+
+    // smooth scroll progress
+    cam.prog += (cam.targetProg - cam.prog) * 0.08;
+
+    // camera target: zoom into door
+    const door = scene.door || { x: W*0.5, y: H*0.5 };
+
+    // wide view (prog=0)
+    const wideScale = 1.0;
+    const wideX = 0;
+    const wideY = 0;
+
+    // zoom view (prog=1)
+    const zoomScale = 3.0; // change if you want closer/farther
+    // Center door on screen
+    const zoomX = door.x - (W/2) / zoomScale;
+    const zoomY = door.y - (H/2) / zoomScale;
+
+    cam.scale = wideScale + (zoomScale - wideScale) * cam.prog;
+    cam.x = wideX + (zoomX - wideX) * cam.prog;
+    cam.y = wideY + (zoomY - wideY) * cam.prog;
+    applyCamera();
+
+    // time
+    t += 1/60;
+
+    // animate each sprite
+    for (const s of sprites){
+      const a = s.anim || { type:'none' };
+      const base = s._base;
+
+      let x = base.x, y = base.y, sc = base.scale, r = base.rot;
+
+      if (a.type === 'cloud'){
+        const vx = Number(a.vx||0);
+        const wob = Math.sin(t*0.8 + hash(s.fileName))*2;
+
+        // real width for wrap (use naturalWidth once loaded)
+        const natW = (s._el.naturalWidth || 600);
+        const w = natW * (base.scale || 1);
+        const pad = 80;
+
+        x = base.x + t*vx;
+        y = base.y + wob;
+
+        if (vx >= 0 && x > W + pad) x = -w - pad;
+        if (vx <  0 && x < -w - pad) x = W + pad;
+      }
+
+      if (a.type === 'water'){
+        const loopW = Math.max(200, Number(a.waterLoopW || 1200));
+        let xx = base.x + t*(Number(a.vx||0));
+        xx = ((xx % loopW) + loopW) % loopW - loopW;
+        x = xx; y = base.y;
+      }
+
+      if (a.type === 'tree'){
+        x = base.x; y = base.y; sc = base.scale;
+        r = base.rot + Math.sin(t*(Number(a.treeSpeed||1)) + hash(s.fileName))*(Number(a.treeSway||1.2));
+      }
+
+      if (a.type === 'float'){
+        x = base.x + Math.sin(t*0.6 + hash(s.fileName))*1.5;
+        y = base.y + Math.sin(t*(Number(a.floatSpd||1.2)) + hash(s.fileName))*(Number(a.floatAmt||3));
+      }
+
+      if (a.type === 'boat'){
+        const vx = Number(a.vx||0), vy = Number(a.vy||0), vs = Number(a.vs||0);
+
+        x = base.x + t*vx;
+        y = base.y + t*vy + Math.sin(t*1.6 + hash(s.fileName))*3;
+        sc = clamp(base.scale + t*vs, Number(a.minS||0.2), Number(a.maxS||3));
+        r = base.rot + Math.sin(t*1.2 + hash(s.fileName))*(Number(a.swayRot||0.6));
+
+        if ((a.loop||'wrap')==='wrap'){
+          const natW = (s._el.naturalWidth || 400) * sc;
+          const natH = (s._el.naturalHeight|| 200) * sc;
+          if (x > W + natW + 300) x = -natW - 300;
+          if (x < -natW - 300)    x = W + 300;
+          if (y > H + natH + 300) y = -natH - 300;
+          if (y < -natH - 300)    y = H + 300;
+        }
+      }
+
+      s.x = x; s.y = y; s.scale = sc; s.rot = r;
+      applySpriteTransform(s._el, s);
+    }
+
+    requestAnimationFrame(tick);
+  }
+
+  // Scroll / swipe to zoom
+  // - mouse wheel changes targetProg
+  // - touch swipe up/down changes targetProg
+  function onWheel(e){
+    e.preventDefault();
+    const delta = Math.sign(e.deltaY);
+    cam.targetProg = clamp(cam.targetProg + delta*0.08, 0, 1);
+  }
+  window.addEventListener('wheel', onWheel, { passive:false });
+
+  let touchStartY = null;
+  window.addEventListener('touchstart', (e)=>{
+    if (e.touches.length !== 1) return;
+    touchStartY = e.touches[0].clientY;
+  }, { passive:true });
+
+  window.addEventListener('touchmove', (e)=>{
+    if (touchStartY == null) return;
+    const y = e.touches[0].clientY;
+    const dy = y - touchStartY;
+    // swipe up => zoom in (prog+)
+    cam.targetProg = clamp(cam.targetProg + (-dy/500), 0, 1);
+    touchStartY = y;
+  }, { passive:true });
+
+  window.addEventListener('touchend', ()=>{ touchStartY = null; }, { passive:true });
+
+  // double tap to reset (nice for mobile)
+  let lastTap = 0;
+  window.addEventListener('touchend', (e)=>{
+    const now = Date.now();
+    if (now - lastTap < 280){
+      cam.targetProg = 0;
+    }
+    lastTap = now;
+  }, { passive:true });
+
+  // Boot
+  loadScene()
+    .then(() => requestAnimationFrame(tick))
+    .catch(err => {
+      document.body.innerHTML = `<div style="color:white;font:16px system-ui;padding:20px">
+        <b>Viewer error:</b><br>${err.message}<br><br>
+        Make sure:<br>
+        - viewer.html and scene.json are in the same folder<br>
+        - images are in assets/ and fileName matches exactly (case sensitive on web hosting)
+      </div>`;
+      console.error(err);
+    });
+
+})();
+</script>
+</body>
+</html>
