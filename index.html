@@ -3,279 +3,813 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>Scene</title>
-  <style>
-    html,body{height:100%;margin:0;overflow:hidden;background:#000}
-    /* block browser pinch zoom / overscroll */
-    body{touch-action: pan-y; overscroll-behavior: none;}
+  <title>Scene Viewer</title>
 
-    .wrap{
-      position:fixed; inset:0;
-      display:grid; place-items:center;
-      background:#000;
+  <style>
+    :root{
+      font-family:"Mona Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     }
 
-    /* phone-like viewport (real iPhone size) */
+    html,body{height:100%;margin:0;overflow:hidden;background:#000}
+    body{touch-action: pan-y; overscroll-behavior:none;}
+    *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none; font-family:inherit;}
+    img{ -webkit-touch-callout:none; }
+
+    .wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000;}
     .frame{
       position:relative;
-      width:390px;
-      height:844px;
+      width:390px;height:844px;
       overflow:hidden;
       border-radius:22px;
       background:#000;
+      isolation:isolate;
+    }
+    @media (max-width:420px){
+      .frame{width:100vw;height:100vh;border-radius:0;}
     }
 
-    /* camera transform happens here */
-    .camera{
-      position:absolute; inset:0;
-      transform-origin: 0 0;
-      will-change: transform;
-    }
-
+    .camera{position:absolute;inset:0;transform-origin:0 0;will-change:transform; z-index:1;}
     .sprite{
-      position:absolute; left:0; top:0;
-      transform-origin:0 0;
-      user-select:none; -webkit-user-drag:none;
-      pointer-events:none;
-      will-change: transform;
+      position:absolute;left:0;top:0;transform-origin:0 0;
+      pointer-events:none !important;
+      will-change:transform,opacity;
     }
 
-    /* optional subtle vignette */
-    .vignette{
+    /* Clickable speech bubble (this is the "button") */
+    .touchCloud{
+      position:absolute;
+      padding:10px 14px;
+      border-radius:999px;
+      background:rgba(255,255,255,.92);
+      color:#000;
+      font-weight:900;
+      font-size:14px;
+      line-height:1.1;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      pointer-events:auto;
+      cursor:pointer;
+      opacity:0;
+      transform-origin:50% 100%;
+      will-change:transform,opacity;
+      z-index:5;
+    }
+    .touchCloud:after{
+      content:"";
+      position:absolute;
+      left:50%; bottom:-10px;
+      width:0;height:0;
+      border-left:10px solid transparent;
+      border-right:10px solid transparent;
+      border-top:12px solid rgba(255,255,255,.92);
+      transform:translateX(-50%);
+      filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));
+    }
+
+    /* Proposal UI overlay (centered, softer card) */
+    .overlay{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      pointer-events:none;
+      opacity:0;
+      transition:opacity .25s ease;
+      z-index:20;
+      padding:20px;
+    }
+    .overlay.show{opacity:1; pointer-events:auto;}
+
+    .panel{
+      width:320px;
+      max-width:90vw;
+      background:rgba(0,0,0,.55);
+      border:1px solid rgba(255,255,255,.18);
+      border-radius:18px;
+      padding:22px 18px;
+      box-shadow:0 20px 60px rgba(0,0,0,.45);
+      backdrop-filter: blur(8px);
+      text-align:center;
+      overflow:hidden;
+    }
+
+    .q{
+      color:#fff;
+      font-weight:900;
+      font-size:22px;
+      line-height:1.35;
+      margin:0 0 18px 0;
+      letter-spacing:.2px;
+      white-space:normal;
+      overflow-wrap:anywhere;
+    }
+
+    .btnRow{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+      align-items:stretch;
+      position:relative;
+    }
+
+    .btn{
+      border:0;
+      border-radius:14px;
+      padding:12px 10px;
+      font-weight:900;
+      font-size:16px;
+      line-height:1;
+      cursor:pointer;
+      transition:transform .08s ease, filter .08s ease;
+      width:100%;
+    }
+    .btn:active{transform:translateY(1px) scale(.99); filter:brightness(.98);}
+
+    .yes{ background:#2dd4a3; color:#000; }
+    .no { background:#ff3b3b; color:#fff; }
+
+    .yay{
+      margin-top:14px;
+      text-align:center;
+      color:#fff;
+      font-weight:900;
+      font-size:18px;
+      line-height:1.25;
+      display:none;
+      white-space:normal;
+      overflow-wrap:anywhere;
+    }
+    .yay.show{display:block;}
+
+    /* Cracker/confetti gif overlay */
+    .crackerLayer{
       position:absolute; inset:0;
+      display:grid; place-items:center;
       pointer-events:none;
-      background: radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(0,0,0,.25) 80%, rgba(0,0,0,.55) 100%);
+      opacity:0;
+      transition:opacity .2s ease;
+      z-index:30;
+    }
+    .crackerLayer.show{ opacity:1; }
+    .crackerLayer img{
+      width:min(92vw, 720px);
+      height:auto;
+      filter:drop-shadow(0 20px 60px rgba(0,0,0,.55));
     }
 
-    /* mobile: fit screen (no blur) */
-    @media (max-width: 420px){
-      .frame{ width:100vw; height:100vh; border-radius:0; }
+    /* YES PNG overlay (flicker then stays) */
+    .yesPicLayer{
+      position:absolute;
+      inset:0;
+      display:grid;
+      place-items:center;
+      pointer-events:none;
+      opacity:0;
+      z-index:32;
+    }
+    .yesPicLayer.show{ opacity:1; }
+    .yesPicLayer img{
+      width:min(90vw, 520px);
+      height:auto;
+      border-radius:18px;
+      box-shadow:0 20px 70px rgba(0,0,0,.55);
+    }
+
+    @keyframes flickerIn{
+      0%   { opacity:0; transform:scale(.98); filter:brightness(.9); }
+      8%   { opacity:1; filter:brightness(1.15); }
+      16%  { opacity:.25; }
+      24%  { opacity:1; }
+      32%  { opacity:.45; }
+      40%  { opacity:1; }
+      55%  { opacity:.65; }
+      70%  { opacity:1; }
+      85%  { opacity:.85; }
+      100% { opacity:1; transform:scale(1); filter:brightness(1); }
+    }
+
+    /* NO container: starts inside card, then free-floating anywhere on screen */
+    .noWrap{
+      position:relative;
+      width:100%;
+    }
+    .noWrap.free{
+      position:absolute;
+      width:170px;
+      pointer-events:auto;
+      z-index:25;
+    }
+    .noHidden{
+      opacity:0 !important;
+      pointer-events:none !important;
+    }
+
+    /* Thanos red dust particles (tiny + many) */
+    .dustParticle{
+      position:absolute;
+      width:2px;height:2px;border-radius:999px;
+      background:rgba(255, 60, 60, .95);
+      pointer-events:none;
+      will-change:transform,opacity;
+      filter:blur(.25px);
+      z-index:24;
+      mix-blend-mode:screen;
+    }
+
+    .vignette{
+      position:absolute;inset:0;pointer-events:none;
+      background:radial-gradient(ellipse at center,
+        rgba(0,0,0,0) 45%,
+        rgba(0,0,0,.25) 80%,
+        rgba(0,0,0,.55) 100%);
+      z-index:40;
     }
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <div class="frame" id="frame">
       <div class="camera" id="camera"></div>
+
+      <!-- Clickable bubble -->
+      <div class="touchCloud" id="touchCloud">Touch me</div>
+
+      <!-- Proposal overlay -->
+      <div class="overlay" id="overlay">
+        <div class="panel" id="panel">
+          <p class="q">
+            Will you marry me,<br>
+            my Sangee?
+          </p>
+
+          <div class="btnRow" id="btnRow">
+            <button class="btn yes" id="yesBtn">Yes</button>
+
+            <!-- NO starts here (same size as YES) -->
+            <div class="noWrap" id="noWrap">
+              <button class="btn no" id="noBtn">No</button>
+            </div>
+          </div>
+
+          <div class="yay" id="yay">Yay ! I love you, Sangee ! Muwaahhhh !</div>
+        </div>
+      </div>
+
+      <!-- Cracker GIF layer (plays on YES) -->
+      <div class="crackerLayer" id="crackerLayer">
+        <!-- Put your gif at: assets/cracker.gif (or change CRACKER_GIF below) -->
+        <img id="crackerGif" alt="celebration" />
+      </div>
+
+      <!-- Couple PNG (flicker then stay) -->
+      <div class="yesPicLayer" id="yesPicLayer">
+        <!-- Put your png at: assets/couple.png -->
+        <img id="yesPic" alt="couple" />
+      </div>
+
       <div class="vignette"></div>
     </div>
   </div>
 
 <script>
 (() => {
+  /*****************************************************************
+   * EDIT THESE ONLY
+   *****************************************************************/
+  const CLOUD_OFFSET_X = 45;
+  const CLOUD_OFFSET_Y = 140;
+
+  const ZOOM_SCALE = 3.0;
+  const TOUCH_ENABLE_AT = 0.92;
+
+  const GENIE_LEV_AMP = 10;
+  const GENIE_LEV_SPD = 2.2;
+
+  const PUGAI_SPAWN_Y_OFFSET = 20;
+
+  const CRACKER_GIF = "assets/cracker.gif";
+  const YES_PNG = "assets/couple.png";
+  const YES_FLICKER_MS = 2500;
+
+  // Thanos snap settings
+  const SNAP_PARTICLES = 260;
+  const SNAP_SCATTER_MS = 700;
+  const SNAP_MAGNET_MS  = 700;
+
+  /*****************************************************************/
+  const frame = document.getElementById('frame');
   const cameraEl = document.getElementById('camera');
-  const frameEl = document.getElementById('frame');
+  const touchCloud = document.getElementById('touchCloud');
 
-  // Animation state
-  let scene = null;
-  let sprites = [];
-  let t = 0;
+  const overlay = document.getElementById('overlay');
+  const btnRow = document.getElementById('btnRow');
+  const yesBtn = document.getElementById('yesBtn');
+  const noBtn = document.getElementById('noBtn');
+  const noWrap = document.getElementById('noWrap');
+  const yay = document.getElementById('yay');
 
-  // Camera (what scroll controls)
-  const cam = {
-    scale: 1,
-    x: 0,
-    y: 0,
-    // scroll target 0..1 (0=wide, 1=zoom to door)
-    prog: 0,
-    targetProg: 0
-  };
+  const crackerLayer = document.getElementById('crackerLayer');
+  const crackerGif = document.getElementById('crackerGif');
+  crackerGif.src = CRACKER_GIF;
 
-  function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
-  function hash(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31 + s.charCodeAt(i))>>>0; return (h % 628)/100; }
+  const yesPicLayer = document.getElementById('yesPicLayer');
+  const yesPic = document.getElementById('yesPic');
+  yesPic.src = YES_PNG;
 
-  function applySpriteTransform(el, s){
-    el.style.transform = `translate(${s.x}px, ${s.y}px) rotate(${s.rot}deg) scale(${s.scale})`;
-  }
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const clamp01 = (t)=>clamp(t,0,1);
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  const easeOutCubic = (t)=>1-Math.pow(1-t,3);
+  const easeInOutQuad = (t)=>t<0.5 ? 2*t*t : 1 - Math.pow(-2*t+2,2)/2;
+  const easeOutBack = (t)=>{ const c1=1.70158,c3=c1+1; return 1 + c3*Math.pow(t-1,3) + c1*Math.pow(t-1,2); };
+
+  const hash = (s)=>{ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return (h%628)/100; };
+
+  // Camera program: 0..1 zoom, 1..2 genie phase
+  const cam = { prog:0, target:0, scale:1, x:0, y:0 };
+
+  let scene=null, sprites=[], t=0;
+  let pugaiBase=null;
+
+  let touchMeEnabled=false;
+  let proposalRequested=false;
 
   function applyCamera(){
     cameraEl.style.transform = `translate(${-cam.x}px, ${-cam.y}px) scale(${cam.scale})`;
   }
+  function setTransform(el, x, y, rot, sx, sy){
+    el.style.transform = `translate(${x}px, ${y}px) rotate(${rot}deg) scale(${sx}, ${sy})`;
+  }
+  function isGenie(layer){
+    const fn = (layer.fileName||'').toLowerCase();
+    return layer.anim?.type === 'genie' || fn.includes('genie');
+  }
+  function isPugai(layer){
+    const fn = (layer.fileName||'').toLowerCase();
+    return fn.includes('pugai');
+  }
 
-  function setFrameSizeFromScene(){
-    // If user exported a preset (e.g. 430x932), match it.
-    if (!scene.devicePreset) return;
-    const [w,h] = scene.devicePreset.split('x').map(n=>parseInt(n,10));
-    if (Number.isFinite(w) && Number.isFinite(h)){
-      frameEl.style.width = w + 'px';
-      frameEl.style.height = h + 'px';
+  function parseFirstJSONObject(raw){
+    const s = raw.trim();
+    try { return JSON.parse(s); } catch {}
+    const start = s.indexOf('{');
+    if(start < 0) throw new Error('scene.json has no "{" (not JSON).');
+
+    let depth=0, inStr=false, esc=false;
+    for(let i=start;i<s.length;i++){
+      const ch=s[i];
+      if(inStr){
+        if(esc){ esc=false; continue; }
+        if(ch==='\\'){ esc=true; continue; }
+        if(ch === '"'){ inStr=false; continue; }
+      }else{
+        if(ch === '"'){ inStr=true; continue; }
+        if(ch === '{') depth++;
+        if(ch === '}'){
+          depth--;
+          if(depth === 0) return JSON.parse(s.slice(start, i+1));
+        }
+      }
     }
+    throw new Error('scene.json object not closed (missing "}").');
   }
 
   async function loadScene(){
     const res = await fetch('scene.json', { cache:'no-store' });
-    if (!res.ok) throw new Error('scene.json not found. Export from editor and save it next to viewer.html');
-    scene = await res.json();
-    if (!scene.layers) throw new Error('scene.json missing layers[]');
+    if(!res.ok) throw new Error('scene.json not found (case-sensitive filename).');
 
-    setFrameSizeFromScene();
+    const raw = await res.text();
+    scene = parseFirstJSONObject(raw);
+    if(!scene || !Array.isArray(scene.layers)) throw new Error('scene.json missing layers[].');
 
-    // build sprites in z order
+    if(scene.devicePreset){
+      const [w,h] = scene.devicePreset.split('x').map(n=>parseInt(n,10));
+      if(Number.isFinite(w) && Number.isFinite(h)){
+        frame.style.width = w+'px';
+        frame.style.height = h+'px';
+      }
+    }
+
+    cameraEl.innerHTML = '';
     sprites = scene.layers
       .slice()
       .sort((a,b)=>(a.z??0)-(b.z??0))
-      .map((l, idx) => {
+      .map((l, idx)=>{
         const img = new Image();
-        img.className = 'sprite';
+        img.className='sprite';
         img.src = `assets/${l.fileName}`;
         img.style.zIndex = String(idx+1);
+        img.style.opacity = (l.visible === false) ? '0' : '1';
         cameraEl.appendChild(img);
 
-        return {
+        const obj = {
           ...l,
           _el: img,
           _base: { x:l.x, y:l.y, scale:l.scale, rot:l.rot }
         };
+
+        if(isPugai(obj)) pugaiBase = { x: obj._base.x, y: obj._base.y };
+        return obj;
       });
 
-    // start camera at wide view
-    cam.scale = 1;
-    cam.x = 0;
-    cam.y = 0;
     applyCamera();
   }
 
-  function tick(){
-    const W = frameEl.clientWidth;
-    const H = frameEl.clientHeight;
+  function updateCamera(){
+    const W = frame.clientWidth;
+    const H = frame.clientHeight;
 
-    // smooth scroll progress
-    cam.prog += (cam.targetProg - cam.prog) * 0.08;
+    cam.prog += (cam.target - cam.prog) * 0.09;
 
-    // camera target: zoom into door
-    const door = scene.door || { x: W*0.5, y: H*0.5 };
+    const zoomP  = clamp01(cam.prog);
+    const genieP = clamp01(cam.prog - 1);
 
-    // wide view (prog=0)
-    const wideScale = 1.0;
-    const wideX = 0;
-    const wideY = 0;
+    const door = scene.door || { x: W*0.55, y: H*0.35 };
 
-    // zoom view (prog=1)
-    const zoomScale = 3.0; // change if you want closer/farther
-    // Center door on screen
-    const zoomX = door.x - (W/2) / zoomScale;
-    const zoomY = door.y - (H/2) / zoomScale;
+    const wideScale=1, wideX=0, wideY=0;
+    const zoomX = door.x - (W/2) / ZOOM_SCALE;
+    const zoomY = door.y - (H/2) / ZOOM_SCALE;
 
-    cam.scale = wideScale + (zoomScale - wideScale) * cam.prog;
-    cam.x = wideX + (zoomX - wideX) * cam.prog;
-    cam.y = wideY + (zoomY - wideY) * cam.prog;
+    const k = easeInOutQuad(zoomP);
+    cam.scale = lerp(wideScale, ZOOM_SCALE, k);
+    cam.x     = lerp(wideX, zoomX, k);
+    cam.y     = lerp(wideY, zoomY, k);
+
     applyCamera();
+    return { W, H, genieP };
+  }
 
-    // time
+  function wrapPos(pos, span){
+    let x = pos % span;
+    if(x < -span) x += span;
+    if(x >  span) x -= span;
+    return x;
+  }
+
+  function updateTouchCloud(genieWorld){
+    if(!genieWorld || !touchMeEnabled || overlay.classList.contains('show')){
+      touchCloud.style.opacity = '0';
+      touchCloud.style.pointerEvents = 'none';
+      return;
+    }
+
+    const wx = genieWorld.x + CLOUD_OFFSET_X;
+    const wy = genieWorld.y + CLOUD_OFFSET_Y;
+
+    const sx = (wx - cam.x) * cam.scale;
+    const sy = (wy - cam.y) * cam.scale;
+
+    const bubbleScale = Math.max(0.75, 1 / cam.scale);
+    touchCloud.style.opacity = '1';
+    touchCloud.style.pointerEvents = 'auto';
+    touchCloud.style.transform =
+      `translate(${sx}px, ${sy}px) translate(-50%,-100%) scale(${bubbleScale})`;
+  }
+
+  function onTouchMe(){
+    if(!touchMeEnabled) return;
+    cam.target = 0;
+    proposalRequested = true;
+  }
+
+  function showProposal(){
+    overlay.classList.add('show');
+
+    // reset visuals
+    yay.classList.remove('show');
+    crackerLayer.classList.remove('show');
+    yesPicLayer.classList.remove('show');
+    yesPic.style.animation = 'none';
+
+    // reset NO
+    if(noWrap.classList.contains('free')){
+      noWrap.classList.remove('free','noHidden');
+      noWrap.style.left = '';
+      noWrap.style.top = '';
+      noWrap.style.transform = '';
+      btnRow.appendChild(noWrap);
+    }
+  }
+
+  function playCracker(){
+    const base = CRACKER_GIF.split('?')[0];
+    crackerGif.src = base + '?t=' + Date.now(); // restart gif
+    crackerLayer.classList.add('show');
+    setTimeout(()=>crackerLayer.classList.remove('show'), 4200);
+  }
+
+  function showCoupleWithFlicker(){
+    yesPicLayer.classList.add('show');
+    yesPic.style.animation = `flickerIn ${YES_FLICKER_MS}ms ease-out 1`;
+
+    setTimeout(()=>{
+      yesPic.style.animation = 'none';
+      yesPic.style.opacity = '1';
+    }, YES_FLICKER_MS + 60);
+  }
+
+  /* ---- Thanos Snap + Magnet (red tiny dust) ---- */
+  function spawnDustFromRect(rect, frameRect, count){
+    const parts = [];
+    const w = rect.width;
+    const h = rect.height;
+
+    for(let i=0;i<count;i++){
+      const p = document.createElement('div');
+      p.className = 'dustParticle';
+
+      const sz = 1 + Math.random()*1.5; // 1..2.5px
+      p.style.width = sz + 'px';
+      p.style.height = sz + 'px';
+      p.style.opacity = String(0.45 + Math.random()*0.55);
+
+      const px = (rect.left - frameRect.left) + Math.random()*w;
+      const py = (rect.top  - frameRect.top ) + Math.random()*h;
+
+      const speed = 1.6 + Math.random()*4.2;
+      const ang = (Math.random()*Math.PI*2);
+      const vx = Math.cos(ang) * speed * (Math.random() < 0.35 ? 2.0 : 1);
+      const vy = Math.sin(ang) * speed;
+
+      p._x = px; p._y = py;
+      p._vx = vx;
+      p._vy = vy;
+      p._baseA = parseFloat(p.style.opacity) || 1;
+
+      p.style.transform = `translate(${px}px, ${py}px)`;
+      frame.appendChild(p);
+      parts.push(p);
+    }
+    return parts;
+  }
+
+  function scatterDust(parts, ms){
+    return new Promise(resolve=>{
+      const start = performance.now();
+      function step(now){
+        const tt = clamp01((now - start)/ms);
+        const k = 1 - Math.pow(1-tt, 3);
+
+        for(const p of parts){
+          const x = p._x + p._vx * (28*k);
+          const y = p._y + p._vy * (28*k) + (22*k);
+          const a = p._baseA * (1 - 0.70*k);
+
+          p.style.opacity = String(Math.max(0, a));
+          p.style.transform = `translate(${x}px, ${y}px) scale(${1 - 0.35*k})`;
+          p._sx = x; p._sy = y;
+        }
+
+        if(tt < 1) requestAnimationFrame(step);
+        else resolve();
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  function magnetDust(parts, targetCX, targetCY, ms){
+    return new Promise(resolve=>{
+      const start = performance.now();
+
+      for(const p of parts){
+        const ang = Math.random()*Math.PI*2;
+        const rad = 1 + Math.random()*24;
+        p._tx = targetCX + Math.cos(ang)*rad;
+        p._ty = targetCY + Math.sin(ang)*rad;
+      }
+
+      function step(now){
+        const tt = clamp01((now - start)/ms);
+        const k = easeInOutQuad(tt);
+
+        for(const p of parts){
+          const x = lerp(p._sx, p._tx, k);
+          const y = lerp(p._sy, p._ty, k);
+          const a = lerp(0.20, 1.0, k) * p._baseA;
+
+          p.style.opacity = String(Math.max(0, a));
+          p.style.transform = `translate(${x}px, ${y}px) scale(${0.55 + 0.65*k})`;
+        }
+
+        if(tt < 1) requestAnimationFrame(step);
+        else resolve();
+      }
+      requestAnimationFrame(step);
+    });
+  }
+
+  function teleportNoWithSnap(){
+    if(!noWrap.classList.contains('free')){
+      noWrap.classList.add('free');
+      frame.appendChild(noWrap);
+
+      // place it at its current position first
+      const fr = frame.getBoundingClientRect();
+      const br = noBtn.getBoundingClientRect();
+      noWrap.style.left = `${(br.left - fr.left)}px`;
+      noWrap.style.top  = `${(br.top  - fr.top )}px`;
+      noWrap.style.transform = 'translate(0,0)';
+    }
+
+    const fr = frame.getBoundingClientRect();
+    const br = noBtn.getBoundingClientRect();
+
+    const bw = 170, bh = 54, margin = 12;
+    const targetX = lerp(margin, Math.max(margin, fr.width  - margin - bw), Math.random());
+    const targetY = lerp(margin, Math.max(margin, fr.height - margin - bh), Math.random());
+
+    const particles = spawnDustFromRect(br, fr, SNAP_PARTICLES);
+    noWrap.classList.add('noHidden');
+
+    scatterDust(particles, SNAP_SCATTER_MS)
+      .then(()=>magnetDust(particles, targetX + bw/2, targetY + bh/2, SNAP_MAGNET_MS))
+      .then(()=>{
+        noWrap.style.left = `${targetX}px`;
+        noWrap.style.top  = `${targetY}px`;
+        noWrap.style.transform = 'translate(0,0)';
+        noWrap.classList.remove('noHidden');
+
+        for(const p of particles) p.remove();
+      });
+  }
+
+  // Scroll controls (disabled when overlay is shown)
+  window.addEventListener('wheel', (e)=>{
+    e.preventDefault();
+    if(overlay.classList.contains('show')) return;
+    const d = Math.sign(e.deltaY);
+    cam.target = clamp(cam.target + d*0.10, 0, 2);
+  }, {passive:false});
+
+  let lastY=null;
+  window.addEventListener('touchstart',(e)=>{
+    if(overlay.classList.contains('show')) return;
+    if(e.touches.length!==1) return;
+    lastY = e.touches[0].clientY;
+  }, {passive:true});
+
+  window.addEventListener('touchmove',(e)=>{
+    if(overlay.classList.contains('show')) return;
+    if(lastY==null) return;
+    const y=e.touches[0].clientY;
+    const dy=y-lastY;
+    cam.target = clamp(cam.target + (-dy/450), 0, 2);
+    lastY = y;
+  }, {passive:true});
+
+  window.addEventListener('touchend', ()=>{ lastY=null; }, {passive:true});
+
+  // Handlers
+  touchCloud.addEventListener('click', onTouchMe, { passive:true });
+  touchCloud.addEventListener('touchend', (e)=>{ e.preventDefault(); onTouchMe(); }, { passive:false });
+
+  yesBtn.addEventListener('click', ()=>{
+    yay.classList.add('show');
+    playCracker();
+    showCoupleWithFlicker();
+  });
+
+  noBtn.addEventListener('click', ()=>{ teleportNoWithSnap(); });
+
+  function tick(){
+    if(!scene) return;
+
+    const { W, genieP } = updateCamera();
     t += 1/60;
 
-    // animate each sprite
-    for (const s of sprites){
+    touchMeEnabled = (genieP >= TOUCH_ENABLE_AT);
+
+    if(proposalRequested && cam.prog < 0.05 && !overlay.classList.contains('show')){
+      showProposal();
+    }
+
+    let genieWorld = null;
+
+    for(const s of sprites){
+      const el = s._el;
+
+      if(s.visible === false){
+        el.style.opacity='0';
+        continue;
+      } else {
+        el.style.opacity='1';
+      }
+
       const a = s.anim || { type:'none' };
       const base = s._base;
 
-      let x = base.x, y = base.y, sc = base.scale, r = base.rot;
+      if(isGenie(s)){
+        const p = clamp01(genieP);
 
-      if (a.type === 'cloud'){
+        const spawn =
+          scene.spawn
+          || (pugaiBase ? { x: pugaiBase.x, y: pugaiBase.y + PUGAI_SPAWN_Y_OFFSET } : null)
+          || (scene.door ? { x: scene.door.x, y: scene.door.y + PUGAI_SPAWN_Y_OFFSET } : null)
+          || { x: base.x, y: base.y };
+
+        if(p <= 0.001){
+          el.style.opacity = '0';
+          continue;
+        }
+
+        el.style.opacity = '1';
+
+        const m = easeOutCubic(p);
+        const x = lerp(spawn.x, base.x, m);
+        const y = lerp(spawn.y, base.y, m);
+
+        const b = easeOutBack(p);
+        const sx = lerp(0.08, 1.0, b);
+        const sy = lerp(1.75, 1.0, b);
+
+        const lev = (p > 0.98) ? Math.sin(t * GENIE_LEV_SPD) * GENIE_LEV_AMP : 0;
+
+        setTransform(el, x, y + lev, base.rot, base.scale * sx, base.scale * sy);
+        genieWorld = { x, y: y + lev };
+        continue;
+      }
+
+      let x=base.x, y=base.y, sc=base.scale, r=base.rot;
+
+      if(a.type === 'cloud'){
         const vx = Number(a.vx||0);
         const wob = Math.sin(t*0.8 + hash(s.fileName))*2;
-
-        // real width for wrap (use naturalWidth once loaded)
-        const natW = (s._el.naturalWidth || 600);
-        const w = natW * (base.scale || 1);
+        const natW = el.naturalWidth || 600;
+        const w = natW * base.scale;
         const pad = 80;
 
         x = base.x + t*vx;
         y = base.y + wob;
 
-        if (vx >= 0 && x > W + pad) x = -w - pad;
-        if (vx <  0 && x < -w - pad) x = W + pad;
+        if(vx >= 0 && x > W + pad) x = -w - pad;
+        if(vx < 0  && x < -w - pad) x = W + pad;
       }
 
-      if (a.type === 'water'){
-        const loopW = Math.max(200, Number(a.waterLoopW || 1200));
-        let xx = base.x + t*(Number(a.vx||0));
-        xx = ((xx % loopW) + loopW) % loopW - loopW;
-        x = xx; y = base.y;
+      if(a.type === 'water'){
+        const loopW = Math.max(200, Number(a.loopW||1200));
+        const vx = Number(a.vx||0);
+        x = base.x + wrapPos(t*vx, loopW);
+        y = base.y;
       }
 
-      if (a.type === 'tree'){
-        x = base.x; y = base.y; sc = base.scale;
-        r = base.rot + Math.sin(t*(Number(a.treeSpeed||1)) + hash(s.fileName))*(Number(a.treeSway||1.2));
+      if(a.type === 'tree'){
+        const sway = Number(a.treeSway||1.2);
+        const spd  = Number(a.treeSpeed||1.0);
+        r = base.rot + Math.sin(t*spd + hash(s.fileName)) * sway;
       }
 
-      if (a.type === 'float'){
+      if(a.type === 'float'){
+        const A = Number(a.floatA||3);
+        const F = Number(a.floatF||1.2);
+        y = base.y + Math.sin(t*F + hash(s.fileName)) * A;
         x = base.x + Math.sin(t*0.6 + hash(s.fileName))*1.5;
-        y = base.y + Math.sin(t*(Number(a.floatSpd||1.2)) + hash(s.fileName))*(Number(a.floatAmt||3));
       }
 
-      if (a.type === 'boat'){
-        const vx = Number(a.vx||0), vy = Number(a.vy||0), vs = Number(a.vs||0);
+      if(a.type === 'boat'){
+        const vx = Number(a.vx||0);
+        const vy = Number(a.vy||0);
+        const vs = Number(a.vs||0);
+        const minS = Number(a.minS||0.2);
+        const maxS = Number(a.maxS||3);
 
-        x = base.x + t*vx;
-        y = base.y + t*vy + Math.sin(t*1.6 + hash(s.fileName))*3;
-        sc = clamp(base.scale + t*vs, Number(a.minS||0.2), Number(a.maxS||3));
-        r = base.rot + Math.sin(t*1.2 + hash(s.fileName))*(Number(a.swayRot||0.6));
+        const loopT = 30;
+        const tt = (t % loopT);
 
-        if ((a.loop||'wrap')==='wrap'){
-          const natW = (s._el.naturalWidth || 400) * sc;
-          const natH = (s._el.naturalHeight|| 200) * sc;
-          if (x > W + natW + 300) x = -natW - 300;
-          if (x < -natW - 300)    x = W + 300;
-          if (y > H + natH + 300) y = -natH - 300;
-          if (y < -natH - 300)    y = H + 300;
-        }
+        x = base.x + tt*vx;
+        y = base.y + tt*vy + Math.sin(t*1.6 + hash(s.fileName))*3;
+        sc = clamp(base.scale + tt*vs, minS, maxS);
+        r = base.rot + Math.sin(t*1.2 + hash(s.fileName)) * (Number(a.sway||0.6));
+
+        const natW = el.naturalWidth || 400;
+        const w = natW * sc;
+        const pad = 100;
+        if(vx >= 0 && x > W + pad) x = -w - pad;
+        if(vx < 0  && x < -w - pad) x = W + pad;
       }
 
-      s.x = x; s.y = y; s.scale = sc; s.rot = r;
-      applySpriteTransform(s._el, s);
+      setTransform(el, x, y, r, sc, sc);
     }
 
+    updateTouchCloud(genieWorld);
     requestAnimationFrame(tick);
   }
 
-  // Scroll / swipe to zoom
-  // - mouse wheel changes targetProg
-  // - touch swipe up/down changes targetProg
-  function onWheel(e){
-    e.preventDefault();
-    const delta = Math.sign(e.deltaY);
-    cam.targetProg = clamp(cam.targetProg + delta*0.08, 0, 1);
-  }
-  window.addEventListener('wheel', onWheel, { passive:false });
-
-  let touchStartY = null;
-  window.addEventListener('touchstart', (e)=>{
-    if (e.touches.length !== 1) return;
-    touchStartY = e.touches[0].clientY;
-  }, { passive:true });
-
-  window.addEventListener('touchmove', (e)=>{
-    if (touchStartY == null) return;
-    const y = e.touches[0].clientY;
-    const dy = y - touchStartY;
-    // swipe up => zoom in (prog+)
-    cam.targetProg = clamp(cam.targetProg + (-dy/500), 0, 1);
-    touchStartY = y;
-  }, { passive:true });
-
-  window.addEventListener('touchend', ()=>{ touchStartY = null; }, { passive:true });
-
-  // double tap to reset (nice for mobile)
-  let lastTap = 0;
-  window.addEventListener('touchend', (e)=>{
-    const now = Date.now();
-    if (now - lastTap < 280){
-      cam.targetProg = 0;
-    }
-    lastTap = now;
-  }, { passive:true });
-
-  // Boot
   loadScene()
-    .then(() => requestAnimationFrame(tick))
-    .catch(err => {
-      document.body.innerHTML = `<div style="color:white;font:16px system-ui;padding:20px">
-        <b>Viewer error:</b><br>${err.message}<br><br>
-        Make sure:<br>
-        - viewer.html and scene.json are in the same folder<br>
-        - images are in assets/ and fileName matches exactly (case sensitive on web hosting)
-      </div>`;
+    .then(()=>requestAnimationFrame(tick))
+    .catch(err=>{
+      document.body.innerHTML = `
+        <div style="color:#fff;font:16px system-ui;padding:20px">
+          <b>Viewer error:</b><br>${err.message}<br><br>
+          Checklist:<br>
+          • viewer.html and scene.json in same folder<br>
+          • images inside assets/<br>
+          • filenames match EXACTLY (case-sensitive)<br>
+          • GitHub Pages is case-sensitive too<br>
+          • put your cracker gif at: assets/cracker.gif (or change CRACKER_GIF)<br>
+          • put your photo at: assets/couple.png
+        </div>`;
       console.error(err);
     });
 
@@ -283,5 +817,3 @@
 </script>
 </body>
 </html>
-
-
